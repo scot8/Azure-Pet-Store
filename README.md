@@ -1,5 +1,7 @@
 # Best Buy Cloud-Native Application
 
+### Note : This Assignment is done using Azure service Bus (Both sending and receiving), Implemented CI-CD Pipeline, Made sure AI service is working
+
 ## Overview
 
 This project demonstrates a full-stack cloud-native application for Best Buy's online store. It implements a microservices architecture deployed on a Kubernetes cluster. The application integrates Azure Service Bus for the Order Queue, AI-powered product descriptions and image generation using GPT-4 and DALL-E, and MongoDB for data persistence.
