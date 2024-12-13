@@ -109,8 +109,11 @@ The architecture includes the following components:
 - Scalability testing for the Azure Service Bus integration is pending.
 - AI Service's latency might increase with high API usage.
 
-##Screenshots
+## Screenshots
+CI-CD proof
 ![Capture](https://github.com/user-attachments/assets/fb04cea1-3e74-4324-8525-fe839c991583)
+![image](https://github.com/user-attachments/assets/d0fc2119-fa5b-444a-9153-2e801a950ad2)
+
 ![Capture2](https://github.com/user-attachments/assets/755522d3-bf4b-4ad1-b713-c04c7f61fd92)
 ![Capture3](https://github.com/user-attachments/assets/f9140a68-91a1-490d-9b39-22a3325dfb80)
 ![image](https://github.com/user-attachments/assets/329e5bd3-de84-4a1f-ba83-6ea89f3dd3ca)
