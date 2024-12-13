@@ -1,0 +1,505 @@
+# StatefulSet for MongoDB
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+spec:
+  serviceName: mongodb # Associated headless service for DNS resolution
+  replicas: 1 # Number of MongoDB replicas
+  selector:
+    matchLabels:
+      app: mongodb # Labels to match for this StatefulSet
+  template:
+    metadata:
+      labels:
+        app: mongodb # Pod label for identification
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux # Run only on Linux nodes
+      containers:
+        - name: mongodb
+          image: mongo:4.2 # MongoDB container image version
+          ports:
+            - containerPort: 27017 # Default MongoDB port
+              name: mongodb
+          resources: # Resource requests and limits for MongoDB
+            requests:
+              cpu: 5m # Minimum CPU
+              memory: 75Mi # Minimum Memory
+            limits:
+              cpu: 25m # Maximum CPU
+              memory: 1024Mi # Maximum Memory
+          livenessProbe: # Probe to check MongoDB health
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - db.runCommand('ping').ok
+            initialDelaySeconds: 5 # Wait time before starting probe
+            periodSeconds: 5 # Interval between probes
+---
+# Service to expose MongoDB
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+spec:
+  ports:
+    - port: 27017 # MongoDB service port
+  selector:
+    app: mongodb # Target pods with label `app: mongodb`
+  type: ClusterIP # Internal cluster service
+---
+# Deployment for Order Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: order-service
+          image: scottx18/order-service-l8:latest
+          ports:
+            - containerPort: 3000
+          env: # Environment variables for Azure Service Bus
+            - name: ORDER_QUEUE_USERNAME
+              value: "RootManageSharedAccessKey"
+            - name: ORDER_QUEUE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: azurebus-secret
+                  key: ORDER_QUEUE_PASSWORD
+            - name: ORDER_QUEUE_HOSTNAME
+              value: "servicebusbb.servicebus.windows.net"
+            - name: ORDER_QUEUE_PORT
+              value: "5671"
+            - name: ORDER_QUEUE_NAME
+              value: "order-queue2"
+            - name: ORDER_QUEUE_TRANSPORT
+              value: "tls"
+            - name: ORDER_QUEUE_RECONNECT_LIMIT
+              value: "3"
+            - name: USE_WORKLOAD_IDENTITY_AUTH
+              value: "false"
+            - name: FASTIFY_ADDRESS
+              value: "0.0.0.0"
+          resources:
+            requests:
+              cpu: 1m
+              memory: 50Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
+          livenessProbe: # Ongoing health check
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe: # Ready status probe
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      dnsPolicy: ClusterFirst
+---
+# Service for Order Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  selector:
+    app: order-service
+---
+# Deployment for Makeline Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: makeline-service
+spec:
+  replicas: 1 # Single replica
+  selector:
+    matchLabels:
+      app: makeline-service
+  template:
+    metadata:
+      labels:
+        app: makeline-service
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: makeline-service
+          image: scottx18/makeline-service-l8:latest # Custom Makeline service image
+          ports:
+            - containerPort: 3001 # Makeline service listens on this port
+          env: # Environment variables for configuration
+            - name: ORDER_QUEUE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: azurebus-secret
+                  key: ORDER_QUEUE_URI
+            - name: ORDER_QUEUE_USERNAME
+              value: "RootManageSharedAccessKey"
+            - name: ORDER_QUEUE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: azurebus-secret
+                  key: ORDER_QUEUE_PASSWORD
+            - name: ORDER_QUEUE_NAME
+              value: "order-queue2"
+            - name: ORDER-QUEUE_TRANSPORT
+              value: "tls"
+            - name: ORDER_QUEUE_RECONNECT_LIMIT
+              value: "3"  
+            - name: ORDER_DB_URI
+              value: "mongodb://mongodb:27017" # MongoDB connection string
+            - name: ORDER_DB_NAME
+              value: "orderdb" # Database name
+            - name: ORDER_DB_COLLECTION_NAME
+              value: "orders" # Collection name
+            - name: "USE_WORKLOAD_IDENTITY_AUTH"
+              value: "false"
+          resources: # Resource requests and limits
+            requests:
+              cpu: 1m
+              memory: 6Mi
+            limits:
+              cpu: 5m
+              memory: 20Mi
+          startupProbe: # Initial health check
+            httpGet:
+              path: /health
+              port: 3001
+            failureThreshold: 10
+            periodSeconds: 5
+          readinessProbe: # Ready status probe
+            httpGet:
+              path: /health
+              port: 3001
+            failureThreshold: 3
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe: # Ongoing health check
+            httpGet:
+              path: /health
+              port: 3001
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+---
+# Service for Makeline Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: makeline-service
+spec:
+  type: ClusterIP # Internal cluster service
+  ports:
+    - name: http
+      port: 3001 # Service port
+      targetPort: 3001
+  selector:
+    app: makeline-service
+---
+# Deployment for Product Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+spec:
+  replicas: 1 # Single replica
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: product-service
+          image: scottx18/product-service-l8:latest # Custom product service image
+          ports:
+            - containerPort: 3002 # Product service listens on this port
+          env: # Environment variables for configuration
+            - name: AI_SERVICE_URL
+              value: "http://ai-service:5001/" # URL for AI service integration
+          resources: # Resource requests and limits
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 2m
+              memory: 20Mi
+          readinessProbe: # Ready status probe
+            httpGet:
+              path: /health
+              port: 3002
+            failureThreshold: 3
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe: # Ongoing health check
+            httpGet:
+              path: /health
+              port: 3002
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+---
+# Service for Product Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3002 # Service port
+      targetPort: 3002
+  selector:
+    app: product-service
+---
+# Deployment for Store Front
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store-front
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: store-front
+  template:
+    metadata:
+      labels:
+        app: store-front
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: store-front
+          image: scottx18/store-front-l8:latest # Front-end store application
+          ports:
+            - containerPort: 8080 # Front-end app port
+              name: store-front
+          env: # Environment variables for backend URLs
+            - name: VUE_APP_ORDER_SERVICE_URL
+              value: "http://order-service:3000/"
+            - name: VUE_APP_PRODUCT_SERVICE_URL
+              value: "http://product-service:3002/"
+          resources: # Resource requests and limits
+            requests:
+              cpu: 1m
+              memory: 200Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          startupProbe: # Initial health check
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          readinessProbe: # Ready status probe
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 3
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          livenessProbe: # Ongoing health check
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+---
+# Service for Store Front
+apiVersion: v1
+kind: Service
+metadata:
+  name: store-front
+spec:
+  ports:
+    - port: 80 # Service port exposed outside the cluster
+      targetPort: 8080 # Target container port
+  selector:
+    app: store-front
+  type: LoadBalancer # Expose service externally via load balancer
+---
+# Deployment for Store Admin
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store-admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: store-admin
+  template:
+    metadata:
+      labels:
+        app: store-admin
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: store-admin
+          image: scottx18/store-admin-l8:latest # Admin interface for store
+          ports:
+            - containerPort: 8081 # Admin app port
+              name: store-admin
+          env: # Environment variables for backend URLs
+            - name: VUE_APP_PRODUCT_SERVICE_URL
+              value: "http://product-service:3002/"
+            - name: VUE_APP_MAKELINE_SERVICE_URL
+              value: "http://makeline-service:3001/"
+          resources: # Resource requests and limits
+            requests:
+              cpu: 1m
+              memory: 200Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          startupProbe: # Initial health check
+            httpGet:
+              path: /health
+              port: 8081
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          readinessProbe: # Ready status probe
+            httpGet:
+              path: /health
+              port: 8081
+            failureThreshold: 3
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe: # Ongoing health check
+            httpGet:
+              path: /health
+              port: 8081
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+---
+# Service for Store Admin
+apiVersion: v1
+kind: Service
+metadata:
+  name: store-admin
+spec:
+  ports:
+    - port: 80 # Service port exposed outside the cluster
+      targetPort: 8081
+  selector:
+    app: store-admin
+  type: LoadBalancer # Expose service externally via load balancer
+---
+# Deployment for AI Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-service
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+        - name: ai-service
+          image: scottx18/ai-service-l8:latest
+          ports:
+            - containerPort: 5001
+          env:
+            - name: USE_AZURE_OPENAI # set to True for Azure OpenAI, False for Public OpenAI
+              value: "True"
+            - name: AZURE_OPENAI_API_VERSION
+              value: "2024-07-01-preview"
+            - name: AZURE_OPENAI_DEPLOYMENT_NAME # required if using Azure OpenAI
+              value: "gpt-4"
+            - name: AZURE_OPENAI_ENDPOINT # required if using Azure OpenAI
+              value: "https://bestbuyai007.openai.azure.com/"
+            - name: AZURE_OPENAI_DALLE_ENDPOINT
+              value: "https://bestbuyai007.openai.azure.com/"
+            - name: AZURE_OPENAI_DALLE_DEPLOYMENT_NAME
+              value: "dall-e-3"
+            - name: OPENAI_API_KEY # always required
+              valueFrom:
+                secretKeyRef:
+                  name: openai-api-secret
+                  key: OPENAI_API_KEY
+          resources:
+            requests:
+              cpu: 20m
+              memory: 50Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 60
+            failureThreshold: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 3
+            failureThreshold: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 3
+            failureThreshold: 10
+            periodSeconds: 10
+---
+# Service for AI Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 5001
+      targetPort: 5001
+  selector:
+    app: ai-service
